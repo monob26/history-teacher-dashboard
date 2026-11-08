@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<header><h1>History Homework Hub</h1><p>Teacher Dashboard · Secure Test</p><div id="signedIn" class="signedin" hidden><span id="signedInEmail"></span><button class="secondary" id="signOut" type="button">Sign out</button></div></header>
+<header><h1>History Homework Hub</h1><p>Teacher Dashboard · Test Environment</p><div id="signedIn" class="signedin" hidden><span id="signedInEmail"></span><button class="secondary" id="signOut" type="button">Sign out</button></div></header>
 <section id="authScreen" class="auth-wrap">
 <div class="auth-panel"><h2 id="authTitle">Teacher sign in</h2>
 <p class="auth-help">For authorised test teachers. This preview uses fictional results only.</p>
@@ -19,67 +19,113 @@
 <button class="primary" id="submitAuth" type="submit">Sign in</button></form>
 <div class="auth-links"><button class="secondary" type="button" id="forgot">Forgot password?</button><button class="secondary" type="button" id="back" hidden>Back to sign in</button></div>
 <div id="authMsg" class="auth-msg" role="status" aria-live="polite"></div>
-<p class="auth-help">There is no public registration. Teacher access will require a separate administrator-approved permission check before real results are enabled.</p>
+<p class="auth-help">There is no public registration. Teacher access is restricted to approved accounts.</p>
 </div></section>
 <main id="dashboard" class="wrap" hidden>
-<div class="notice"><strong>DEMONSTRATION ONLY:</strong> This page contains fictional results. Results are retrieved from Supabase for the fictional test class only. Do not use real pupil information before school approval.</div>
-<section class="panel"><div class="top"><h2>Homework overview</h2><small>Preview · Week 1</small></div>
+<div class="notice"><strong>TEST ENVIRONMENT:</strong> Use fictional pupil information only. Do not enter real pupil data before school IT/DPO approval.</div>
+<section class="panel"><div class="top"><h2>Homework overview</h2><small>Allocated classes · Published homework</small></div>
 <div class="tabs" role="tablist" aria-label="Year group"><button type="button" role="tab" aria-selected="false" data-year="9">Year 9</button><button type="button" role="tab" aria-selected="true" data-year="10">Year 10</button><button type="button" role="tab" aria-selected="false" data-year="11">Year 11</button></div>
-<div class="controls"><label>Class<select id="classSelect" aria-label="Choose class"></select></label><label>Homework<select id="weekSelect" aria-label="Choose homework"><option value="1">Week 1 · Medicine Through Time</option><option value="2">Week 2 · Preview only</option></select></label></div>
+<div class="controls"><label>Class<select id="classSelect" aria-label="Choose class"></select></label><label>Homework<select id="weekSelect" aria-label="Choose homework"></select></label></div>
 <div class="stats"><div class="stat"><strong id="total">—</strong><span>Pupils</span></div><div class="stat"><strong id="completed">—</strong><span>Completed</span></div><div class="stat"><strong id="passed">—</strong><span>Passed</span></div><div class="stat"><strong id="missing">—</strong><span>Not completed</span></div></div></section>
-<section class="panel"><div class="top"><h2>Pupil results</h2><small id="context"></small></div><div class="tablewrap"><table><thead><tr><th>Pupil code</th><th>Attempts</th><th>Highest score</th><th>Status</th></tr></thead><tbody id="results"></tbody></table></div><p class="foot">Only fictional codes are displayed. Results are requested through the teacher-authorised Supabase function.</p></section>
+<section class="panel"><div class="top"><h2>Pupil results</h2><small id="context"></small></div><div class="tablewrap"><table><thead><tr><th>Pupil code</th><th>Attempts</th><th>Highest score</th><th>Status</th></tr></thead><tbody id="results"></tbody></table></div><p class="foot">Test with fictional codes only until school approval. Results are retrieved using teacher-authorised Supabase permissions.</p></section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 'use strict';
-// PUBLIC publishable key only. NEVER insert a service_role or secret key here.
+// Only a public Supabase publishable key belongs in this browser file.
 const SUPABASE_URL='https://inxsjdogxvqbvxydxmym.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_KMcKT_OS-Yekcu6nMtHwxg_SSWHkiMk';
-const TEST_QUIZ_ID='cd9fbeb8-e646-4d2f-b662-2b2044d8591c';
 const REDIRECT_URL='https://monob26.github.io/history-teacher-dashboard/';
-const authScreen=document.getElementById('authScreen');
-const dashboard=document.getElementById('dashboard');
-const authForm=document.getElementById('authForm');
-const authMsg=document.getElementById('authMsg');
-const authTitle=document.getElementById('authTitle');
-const passwordGroup=document.getElementById('passwordGroup');
-const submitAuth=document.getElementById('submitAuth');
-const back=document.getElementById('back');
-const forgot=document.getElementById('forgot');
-let mode='signin';
-let client=null;
+const el=id=>document.getElementById(id);
+const authScreen=el('authScreen'), dashboard=el('dashboard'), authForm=el('authForm');
+const authMsg=el('authMsg'), authTitle=el('authTitle'), passwordGroup=el('passwordGroup');
+const submitAuth=el('submitAuth'), back=el('back'), forgot=el('forgot');
+const classSelect=el('classSelect'), weekSelect=el('weekSelect');
+const yearButtons=[...document.querySelectorAll('[data-year]')];
+let client=null,mode='signin',approved=false,year='10',classes=[],quizzes=[],liveRows=[];
+let authGeneration=0,resultsGeneration=0,selectedClass=null,selectedQuiz=null,loading=false,resultsError='';
 function message(value,error=false){authMsg.textContent=value;authMsg.className='auth-msg '+(error?'error':'ok')}
-function setMode(next){mode=next;authTitle.textContent=next==='signin'?'Teacher sign in':next==='reset'?'Set a new password':'Reset your password';passwordGroup.hidden=next==='forgot';document.getElementById('password').required=next!=='forgot';document.getElementById('password').autocomplete=next==='reset'?'new-password':'current-password';submitAuth.textContent=next==='signin'?'Sign in':next==='reset'?'Save new password':'Send password reset email';forgot.hidden=next!=='signin';back.hidden=next==='signin';message('')}
-function showSignedOut(){checkCounter++;dashboard.hidden=true;authScreen.hidden=false;document.getElementById('signedIn').hidden=true;approved=false;liveRows=[];render()}
-let approved=false,liveRows=[],checkCounter=0;
-async function showSignedIn(user){
-  const token=++checkCounter;
-  dashboard.hidden=true;authScreen.hidden=false;message('Checking teacher authorisation…');
-  try{
-    const {data,error}=await client.rpc('get_history_class_results',{
-      requested_class:'10H1',requested_quiz:TEST_QUIZ_ID
-    });
-    if(token!==checkCounter)return;
-    if(error)throw error;
-    approved=true;liveRows=Array.isArray(data)?data:[];
-    authScreen.hidden=true;dashboard.hidden=false;
-    document.getElementById('signedIn').hidden=false;
-    document.getElementById('signedInEmail').textContent=user.email||'Approved teacher';
-    message('');render();
-  }catch(err){
-    if(token!==checkCounter)return;
-    approved=false;liveRows=[];dashboard.hidden=true;authScreen.hidden=false;
-    document.getElementById('signedIn').hidden=true;
-    message('Access not granted: '+(err.message||'Unable to verify teacher permissions.'),true);
-  }
+function setMode(next){mode=next;authTitle.textContent=next==='signin'?'Teacher sign in':next==='reset'?'Set a new password':'Reset your password';passwordGroup.hidden=next==='forgot';el('password').required=next!=='forgot';el('password').autocomplete=next==='reset'?'new-password':'current-password';submitAuth.textContent=next==='signin'?'Sign in':next==='reset'?'Save new password':'Send password reset email';forgot.hidden=next!=='signin';back.hidden=next==='signin';message('')}
+function option(select,value,label){const o=document.createElement('option');o.value=value;o.textContent=label;select.append(o)}
+function cell(row,value,className){const td=document.createElement('td');td.textContent=value;if(className)td.className=className;row.append(td)}
+function emptyRow(text){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.className='empty';td.textContent=text;tr.append(td);el('results').append(tr)}
+function showSignedOut(){authGeneration++;resultsGeneration++;approved=false;classes=[];quizzes=[];liveRows=[];loading=false;resultsError='';dashboard.hidden=true;authScreen.hidden=false;el('signedIn').hidden=true;render()}
+function syncYear(){for(const b of yearButtons)b.setAttribute('aria-selected',String(b.dataset.year===year))}
+function updateSelectors(){
+ const priorClass=classSelect.value,priorQuiz=weekSelect.value;
+ classSelect.replaceChildren();
+ const available=classes.filter(c=>String(c.year_group)===year);
+ if(!available.length)option(classSelect,'','No allocated classes');
+ else for(const c of available)option(classSelect,c.class_name,c.class_name);
+ if(available.some(c=>c.class_name===priorClass))classSelect.value=priorClass;
+ selectedClass=available.find(c=>c.class_name===classSelect.value)||null;
+ weekSelect.replaceChildren();
+ const availableQuizzes=quizzes.filter(q=>Number(q.year_group)===Number(year));
+ if(!availableQuizzes.length)option(weekSelect,'','No published homework');
+ else for(const q of availableQuizzes)option(weekSelect,q.id,'Week '+q.week_number+' · '+q.quiz_title);
+ if(availableQuizzes.some(q=>q.id===priorQuiz))weekSelect.value=priorQuiz;
+ selectedQuiz=availableQuizzes.find(q=>q.id===weekSelect.value)||null;
+ classSelect.disabled=!selectedClass;weekSelect.disabled=!selectedQuiz;
 }
-if(SUPABASE_PUBLISHABLE_KEY.startsWith('PASTE_')){message('Setup needed: add the Supabase publishable key before testing login.',true)}
-else if(!window.supabase){message('The login library could not load. Check your internet connection.',true)}
+function render(){
+ const ready=approved&&selectedClass&&selectedQuiz&&!loading&&!resultsError;
+ const data=ready?liveRows:[];
+ const completed=data.filter(p=>Number(p.attempts)>0).length;
+ const passed=data.filter(p=>p.homework_status==='Passed').length;
+ const values={total:ready?data.length:'—',completed:ready?completed:'—',passed:ready?passed:'—',missing:ready?data.length-completed:'—'};
+ for(const [id,value] of Object.entries(values))el(id).textContent=value;
+ el('context').textContent=(selectedClass?.class_name||'No class')+' · '+(selectedQuiz?'Week '+selectedQuiz.week_number:'No published quiz');
+ el('results').replaceChildren();
+ if(!approved){emptyRow('Sign in to view results.');return}
+ if(!selectedClass){emptyRow('No classes allocated for this year group.');return}
+ if(!selectedQuiz){emptyRow('No published homework for this year group.');return}
+ if(loading){emptyRow('Loading results…');return}
+ if(resultsError){emptyRow('Unable to load results: '+resultsError);return}
+ if(!data.length){emptyRow('No pupils found in this class.');return}
+ for(const p of data){const tr=document.createElement('tr');cell(tr,p.pupil_code);cell(tr,String(p.attempts));cell(tr,p.highest_score===null?'—':p.highest_score+'/25');const status=p.homework_status||'Not completed';cell(tr,status,status==='Passed'?'status passed':status==='Not passed'?'status notpassed':'status missing');el('results').append(tr)}
+}
+async function loadResults(){
+ const generation=++resultsGeneration;
+ liveRows=[];resultsError='';loading=Boolean(approved&&selectedClass&&selectedQuiz);render();
+ if(!loading)return;
+ const requested_class=selectedClass.class_name,requested_quiz=selectedQuiz.id;
+ try{
+  const {data,error}=await client.rpc('get_history_class_results',{requested_class,requested_quiz});
+  if(generation!==resultsGeneration||!approved)return;
+  if(error)throw error;
+  liveRows=Array.isArray(data)?data:[];
+ }catch(e){if(generation!==resultsGeneration||!approved)return;resultsError=e.message||'Unknown error'}
+ finally{if(generation===resultsGeneration){loading=false;render()}}
+}
+async function showSignedIn(user){
+ const generation=++authGeneration;
+ dashboard.hidden=true;authScreen.hidden=false;message('Checking teacher authorisation…');
+ try{
+  const approval=await client.rpc('is_history_teacher');
+  if(generation!==authGeneration)return;
+  if(approval.error)throw approval.error;
+  if(approval.data!==true)throw new Error('This account is not approved for teacher access.');
+  // Both queries are filtered by database row-level security.
+  const [classResult,quizResult]=await Promise.all([
+   client.from('history_classes').select('id,class_name,year_group').order('class_name'),
+   client.from('history_quizzes').select('id,quiz_title,year_group,topic,week_number,total_questions,pass_mark').eq('is_published',true).order('week_number')
+  ]);
+  if(generation!==authGeneration)return;
+  if(classResult.error)throw classResult.error;
+  if(quizResult.error)throw quizResult.error;
+  approved=true;classes=classResult.data||[];quizzes=quizResult.data||[];
+  authScreen.hidden=true;dashboard.hidden=false;el('signedIn').hidden=false;
+  el('signedInEmail').textContent=user.email||'Approved teacher';
+  if(!classes.some(c=>String(c.year_group)===year)&&classes.length)year=String(classes[0].year_group);
+  syncYear();updateSelectors();message('');await loadResults();
+ }catch(e){if(generation!==authGeneration)return;approved=false;classes=[];quizzes=[];dashboard.hidden=true;authScreen.hidden=false;el('signedIn').hidden=true;message('Access not granted: '+(e.message||'Unable to verify teacher permissions.'),true)}
+}
+if(!window.supabase)message('The login library could not load. Check your internet connection.',true);
 else{
  client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{detectSessionInUrl:true,autoRefreshToken:true,persistSession:true}});
  client.auth.onAuthStateChange((event,session)=>{
-   if(event==='PASSWORD_RECOVERY'){showSignedOut();setMode('reset');return}
-   if(session?.user){if(mode!=='reset')showSignedIn(session.user)}else{showSignedOut()}
+  if(event==='PASSWORD_RECOVERY'){showSignedOut();setMode('reset');return}
+  if(session?.user){if(mode!=='reset')showSignedIn(session.user)}else showSignedOut();
  });
  client.auth.getSession().then(({data,error})=>{if(error)message(error.message,true);else if(data.session?.user&&mode!=='reset')showSignedIn(data.session.user)});
 }
@@ -87,7 +133,7 @@ forgot.addEventListener('click',()=>setMode('forgot'));
 back.addEventListener('click',()=>setMode('signin'));
 authForm.addEventListener('submit',async e=>{
  e.preventDefault();if(!client){message('Supabase configuration is not complete.',true);return}
- const email=document.getElementById('email').value.trim();const password=document.getElementById('password').value;
+ const email=el('email').value.trim(),password=el('password').value;
  submitAuth.disabled=true;message('Please wait…');
  try{
   let result;
@@ -96,37 +142,15 @@ authForm.addEventListener('submit',async e=>{
   else result=await client.auth.updateUser({password});
   if(result.error)throw result.error;
   if(mode==='forgot')message('If the address belongs to an account, a recovery email will be sent.');
-  else if(mode==='reset'){await client.auth.signOut();setMode('signin');message('Password saved. Please sign in.');}
+  else if(mode==='reset'){await client.auth.signOut();setMode('signin');message('Password saved. Please sign in.')}
   else if(result.data?.user)showSignedIn(result.data.user);
- }catch(err){message(err.message||'Something went wrong.',true)}finally{submitAuth.disabled=false}
+ }catch(e){message(e.message||'Something went wrong.',true)}finally{submitAuth.disabled=false}
 });
-document.getElementById('signOut').addEventListener('click',async()=>{if(client)await client.auth.signOut();showSignedOut();setMode('signin')});
-
-const yearButtons=[...document.querySelectorAll('[data-year]')];
-const classSelect=document.getElementById('classSelect');
-const weekSelect=document.getElementById('weekSelect');
-let year='10';
-
-function updateClasses(){classSelect.replaceChildren();for(let i=1;i<=4;i++){const opt=document.createElement('option');opt.value=year+'H'+i;opt.textContent=opt.value;classSelect.append(opt)}}
-function cell(row,value,className){const td=document.createElement('td');td.textContent=value;if(className)td.className=className;row.append(td)}
-function render(){
-  const showTest=approved&&year==='10'&&classSelect.value==='10H1'&&weekSelect.value==='1';
-  const data=showTest?liveRows:[];
-  const completed=data.filter(p=>Number(p.attempts)>0).length;
-  const passed=data.filter(p=>p.homework_status==='Passed').length;
-  const values={total:showTest?data.length:'—',completed:showTest?completed:'—',passed:showTest?passed:'—',missing:showTest?data.length-completed:'—'};
-  for(const [id,val] of Object.entries(values))document.getElementById(id).textContent=val;
-  document.getElementById('context').textContent=classSelect.value+' · '+weekSelect.options[weekSelect.selectedIndex].text;
-  const tbody=document.getElementById('results');tbody.replaceChildren();
-  if(!showTest||!data.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.className='empty';td.textContent=showTest?'No results returned for this class.':'No connected test results for this selection.';tr.append(td);tbody.append(tr);return}
-  for(const p of data){
-    const tr=document.createElement('tr');cell(tr,p.pupil_code);cell(tr,String(p.attempts));
-    cell(tr,p.highest_score===null?'—':p.highest_score+'/25');
-    const status=p.homework_status||'Not completed';
-    cell(tr,status,status==='Passed'?'status passed':status==='Not passed'?'status notpassed':'status missing');tbody.append(tr);
-  }
-}
-for(const btn of yearButtons){btn.addEventListener('click',()=>{year=btn.dataset.year;for(const b of yearButtons)b.setAttribute('aria-selected',String(b===btn));updateClasses();render()})}classSelect.addEventListener('change',render);weekSelect.addEventListener('change',render);updateClasses();render();
+el('signOut').addEventListener('click',async()=>{if(client)await client.auth.signOut();showSignedOut();setMode('signin')});
+for(const b of yearButtons)b.addEventListener('click',()=>{year=b.dataset.year;syncYear();updateSelectors();loadResults()});
+classSelect.addEventListener('change',()=>{selectedClass=classes.find(c=>c.class_name===classSelect.value&&String(c.year_group)===year)||null;loadResults()});
+weekSelect.addEventListener('change',()=>{selectedQuiz=quizzes.find(q=>q.id===weekSelect.value)||null;loadResults()});
+updateSelectors();render();
 </script>
 </body>
 </html>
