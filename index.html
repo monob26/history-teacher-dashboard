@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<header><h1>History Homework Hub</h1><p>Teacher Dashboard · Test Login</p><div id="signedIn" class="signedin" hidden><span id="signedInEmail"></span><button class="secondary" id="signOut" type="button">Sign out</button></div></header>
+<header><h1>History Homework Hub</h1><p>Teacher Dashboard · Secure Test</p><div id="signedIn" class="signedin" hidden><span id="signedInEmail"></span><button class="secondary" id="signOut" type="button">Sign out</button></div></header>
 <section id="authScreen" class="auth-wrap">
 <div class="auth-panel"><h2 id="authTitle">Teacher sign in</h2>
 <p class="auth-help">For authorised test teachers. This preview uses fictional results only.</p>
@@ -22,12 +22,12 @@
 <p class="auth-help">There is no public registration. Teacher access will require a separate administrator-approved permission check before real results are enabled.</p>
 </div></section>
 <main id="dashboard" class="wrap" hidden>
-<div class="notice"><strong>DEMONSTRATION ONLY:</strong> This page contains fictional results. Sign-in is for testing only; teacher authorisation and database access have not yet been enabled. Do not use it for real pupil information.</div>
+<div class="notice"><strong>DEMONSTRATION ONLY:</strong> This page contains fictional results. Results are retrieved from Supabase for the fictional test class only. Do not use real pupil information before school approval.</div>
 <section class="panel"><div class="top"><h2>Homework overview</h2><small>Preview · Week 1</small></div>
 <div class="tabs" role="tablist" aria-label="Year group"><button type="button" role="tab" aria-selected="false" data-year="9">Year 9</button><button type="button" role="tab" aria-selected="true" data-year="10">Year 10</button><button type="button" role="tab" aria-selected="false" data-year="11">Year 11</button></div>
 <div class="controls"><label>Class<select id="classSelect" aria-label="Choose class"></select></label><label>Homework<select id="weekSelect" aria-label="Choose homework"><option value="1">Week 1 · Medicine Through Time</option><option value="2">Week 2 · Preview only</option></select></label></div>
 <div class="stats"><div class="stat"><strong id="total">—</strong><span>Pupils</span></div><div class="stat"><strong id="completed">—</strong><span>Completed</span></div><div class="stat"><strong id="passed">—</strong><span>Passed</span></div><div class="stat"><strong id="missing">—</strong><span>Not completed</span></div></div></section>
-<section class="panel"><div class="top"><h2>Pupil results</h2><small id="context"></small></div><div class="tablewrap"><table><thead><tr><th>Pupil code</th><th>Attempts</th><th>Highest score</th><th>Status</th></tr></thead><tbody id="results"></tbody></table></div><p class="foot">Only fictional codes are displayed. A future protected version will load authorised results from Supabase.</p></section>
+<section class="panel"><div class="top"><h2>Pupil results</h2><small id="context"></small></div><div class="tablewrap"><table><thead><tr><th>Pupil code</th><th>Attempts</th><th>Highest score</th><th>Status</th></tr></thead><tbody id="results"></tbody></table></div><p class="foot">Only fictional codes are displayed. Results are requested through the teacher-authorised Supabase function.</p></section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
@@ -35,6 +35,7 @@
 // PUBLIC publishable key only. NEVER insert a service_role or secret key here.
 const SUPABASE_URL='https://inxsjdogxvqbvxydxmym.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_KMcKT_OS-Yekcu6nMtHwxg_SSWHkiMk';
+const TEST_QUIZ_ID='cd9fbeb8-e646-4d2f-b662-2b2044d8591c';
 const REDIRECT_URL='https://monob26.github.io/history-teacher-dashboard/';
 const authScreen=document.getElementById('authScreen');
 const dashboard=document.getElementById('dashboard');
@@ -49,8 +50,29 @@ let mode='signin';
 let client=null;
 function message(value,error=false){authMsg.textContent=value;authMsg.className='auth-msg '+(error?'error':'ok')}
 function setMode(next){mode=next;authTitle.textContent=next==='signin'?'Teacher sign in':next==='reset'?'Set a new password':'Reset your password';passwordGroup.hidden=next==='forgot';document.getElementById('password').required=next!=='forgot';document.getElementById('password').autocomplete=next==='reset'?'new-password':'current-password';submitAuth.textContent=next==='signin'?'Sign in':next==='reset'?'Save new password':'Send password reset email';forgot.hidden=next!=='signin';back.hidden=next==='signin';message('')}
-function showSignedOut(){dashboard.hidden=true;authScreen.hidden=false;document.getElementById('signedIn').hidden=true}
-function showSignedIn(user){authScreen.hidden=true;dashboard.hidden=false;document.getElementById('signedIn').hidden=false;document.getElementById('signedInEmail').textContent=user.email||'Test teacher'}
+function showSignedOut(){checkCounter++;dashboard.hidden=true;authScreen.hidden=false;document.getElementById('signedIn').hidden=true;approved=false;liveRows=[];render()}
+let approved=false,liveRows=[],checkCounter=0;
+async function showSignedIn(user){
+  const token=++checkCounter;
+  dashboard.hidden=true;authScreen.hidden=false;message('Checking teacher authorisation…');
+  try{
+    const {data,error}=await client.rpc('get_history_class_results',{
+      requested_class:'10H1',requested_quiz:TEST_QUIZ_ID
+    });
+    if(token!==checkCounter)return;
+    if(error)throw error;
+    approved=true;liveRows=Array.isArray(data)?data:[];
+    authScreen.hidden=true;dashboard.hidden=false;
+    document.getElementById('signedIn').hidden=false;
+    document.getElementById('signedInEmail').textContent=user.email||'Approved teacher';
+    message('');render();
+  }catch(err){
+    if(token!==checkCounter)return;
+    approved=false;liveRows=[];dashboard.hidden=true;authScreen.hidden=false;
+    document.getElementById('signedIn').hidden=true;
+    message('Access not granted: '+(err.message||'Unable to verify teacher permissions.'),true);
+  }
+}
 if(SUPABASE_PUBLISHABLE_KEY.startsWith('PASTE_')){message('Setup needed: add the Supabase publishable key before testing login.',true)}
 else if(!window.supabase){message('The login library could not load. Check your internet connection.',true)}
 else{
@@ -84,10 +106,26 @@ const yearButtons=[...document.querySelectorAll('[data-year]')];
 const classSelect=document.getElementById('classSelect');
 const weekSelect=document.getElementById('weekSelect');
 let year='10';
-const fictionalPupils=Array.from({length:30},(_,i)=>({code:'R8T2N-'+String(i+31).padStart(2,'0'),attempts:i===0?2:0,score:i===0?20:null}));
+
 function updateClasses(){classSelect.replaceChildren();for(let i=1;i<=4;i++){const opt=document.createElement('option');opt.value=year+'H'+i;opt.textContent=opt.value;classSelect.append(opt)}}
 function cell(row,value,className){const td=document.createElement('td');td.textContent=value;if(className)td.className=className;row.append(td)}
-function render(){const showDemo=year==='10'&&classSelect.value==='10H1'&&weekSelect.value==='1';const data=showDemo?fictionalPupils:[];for(const [id,val] of Object.entries({total:showDemo?30:'—',completed:showDemo?1:'—',passed:showDemo?1:'—',missing:showDemo?29:'—'})){document.getElementById(id).textContent=val}document.getElementById('context').textContent=classSelect.value+' · '+weekSelect.options[weekSelect.selectedIndex].text;const tbody=document.getElementById('results');tbody.replaceChildren();if(!showDemo){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.className='empty';td.textContent='No fictional demonstration results have been created for this selection.';tr.append(td);tbody.append(tr);return}for(const p of data){const tr=document.createElement('tr');cell(tr,p.code);cell(tr,String(p.attempts));cell(tr,p.score===null?'—':p.score+'/25');cell(tr,p.score!==null&&p.score>=20?'Passed':p.attempts?'Not passed':'Not completed',p.score!==null&&p.score>=20?'status passed':p.attempts?'status notpassed':'status missing');tbody.append(tr)}}
+function render(){
+  const showTest=approved&&year==='10'&&classSelect.value==='10H1'&&weekSelect.value==='1';
+  const data=showTest?liveRows:[];
+  const completed=data.filter(p=>Number(p.attempts)>0).length;
+  const passed=data.filter(p=>p.homework_status==='Passed').length;
+  const values={total:showTest?data.length:'—',completed:showTest?completed:'—',passed:showTest?passed:'—',missing:showTest?data.length-completed:'—'};
+  for(const [id,val] of Object.entries(values))document.getElementById(id).textContent=val;
+  document.getElementById('context').textContent=classSelect.value+' · '+weekSelect.options[weekSelect.selectedIndex].text;
+  const tbody=document.getElementById('results');tbody.replaceChildren();
+  if(!showTest||!data.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.className='empty';td.textContent=showTest?'No results returned for this class.':'No connected test results for this selection.';tr.append(td);tbody.append(tr);return}
+  for(const p of data){
+    const tr=document.createElement('tr');cell(tr,p.pupil_code);cell(tr,String(p.attempts));
+    cell(tr,p.highest_score===null?'—':p.highest_score+'/25');
+    const status=p.homework_status||'Not completed';
+    cell(tr,status,status==='Passed'?'status passed':status==='Not passed'?'status notpassed':'status missing');tbody.append(tr);
+  }
+}
 for(const btn of yearButtons){btn.addEventListener('click',()=>{year=btn.dataset.year;for(const b of yearButtons)b.setAttribute('aria-selected',String(b===btn));updateClasses();render()})}classSelect.addEventListener('change',render);weekSelect.addEventListener('change',render);updateClasses();render();
 </script>
 </body>
