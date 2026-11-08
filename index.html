@@ -43,13 +43,13 @@ const submitAuth=el('submitAuth'), back=el('back'), forgot=el('forgot');
 const classSelect=el('classSelect'), weekSelect=el('weekSelect');
 const yearButtons=[...document.querySelectorAll('[data-year]')];
 let client=null,mode='signin',approved=false,year='10',classes=[],quizzes=[],liveRows=[];
-let authGeneration=0,resultsGeneration=0,selectedClass=null,selectedQuiz=null,loading=false,resultsError='';
+let authGeneration=0,resultsGeneration=0,selectedClass=null,selectedQuiz=null,loading=false,resultsError='',classCodes=[];
 function message(value,error=false){authMsg.textContent=value;authMsg.className='auth-msg '+(error?'error':'ok')}
 function setMode(next){mode=next;authTitle.textContent=next==='signin'?'Teacher sign in':next==='reset'?'Set a new password':'Reset your password';passwordGroup.hidden=next==='forgot';el('password').required=next!=='forgot';el('password').autocomplete=next==='reset'?'new-password':'current-password';submitAuth.textContent=next==='signin'?'Sign in':next==='reset'?'Save new password':'Send password reset email';forgot.hidden=next!=='signin';back.hidden=next==='signin';message('')}
 function option(select,value,label){const o=document.createElement('option');o.value=value;o.textContent=label;select.append(o)}
 function cell(row,value,className){const td=document.createElement('td');td.textContent=value;if(className)td.className=className;row.append(td)}
 function emptyRow(text){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.className='empty';td.textContent=text;tr.append(td);el('results').append(tr)}
-function showSignedOut(){authGeneration++;resultsGeneration++;approved=false;classes=[];quizzes=[];liveRows=[];loading=false;resultsError='';dashboard.hidden=true;authScreen.hidden=false;el('signedIn').hidden=true;render()}
+function showSignedOut(){authGeneration++;resultsGeneration++;approved=false;classes=[];quizzes=[];liveRows=[];classCodes=[];loading=false;resultsError='';dashboard.hidden=true;authScreen.hidden=false;el('signedIn').hidden=true;render()}
 function syncYear(){for(const b of yearButtons)b.setAttribute('aria-selected',String(b.dataset.year===year))}
 function updateSelectors(){
  const priorClass=classSelect.value,priorQuiz=weekSelect.value;
@@ -67,33 +67,45 @@ function updateSelectors(){
  selectedQuiz=availableQuizzes.find(q=>q.id===weekSelect.value)||null;
  classSelect.disabled=!selectedClass;weekSelect.disabled=!selectedQuiz;
 }
+function registerNumber(code){const m=String(code).match(/-(\d+)$/);return m?Number(m[1]):Number.MAX_SAFE_INTEGER}
 function render(){
- const ready=approved&&selectedClass&&selectedQuiz&&!loading&&!resultsError;
- const data=ready?liveRows:[];
- const completed=data.filter(p=>Number(p.attempts)>0).length;
- const passed=data.filter(p=>p.homework_status==='Passed').length;
- const values={total:ready?data.length:'—',completed:ready?completed:'—',passed:ready?passed:'—',missing:ready?data.length-completed:'—'};
+ const ready=approved&&selectedClass&&!loading&&!resultsError;
+ const hasQuiz=Boolean(selectedQuiz);
+ const data=ready?(hasQuiz?liveRows:classCodes.map(p=>({pupil_code:p.pupil_code,attempts:0,highest_score:null,homework_status:'No homework assigned'}))):[];
+ const completed=hasQuiz?data.filter(p=>Number(p.attempts)>0).length:0;
+ const passed=hasQuiz?data.filter(p=>p.homework_status==='Passed').length:0;
+ const values={total:ready?data.length:'—',completed:ready&&hasQuiz?completed:'—',passed:ready&&hasQuiz?passed:'—',missing:ready&&hasQuiz?data.length-completed:'—'};
  for(const [id,value] of Object.entries(values))el(id).textContent=value;
  el('context').textContent=(selectedClass?.class_name||'No class')+' · '+(selectedQuiz?'Week '+selectedQuiz.week_number:'No published quiz');
  el('results').replaceChildren();
  if(!approved){emptyRow('Sign in to view results.');return}
  if(!selectedClass){emptyRow('No classes allocated for this year group.');return}
- if(!selectedQuiz){emptyRow('No published homework for this year group.');return}
- if(loading){emptyRow('Loading results…');return}
- if(resultsError){emptyRow('Unable to load results: '+resultsError);return}
- if(!data.length){emptyRow('No pupils found in this class.');return}
- for(const p of data){const tr=document.createElement('tr');cell(tr,p.pupil_code);cell(tr,String(p.attempts));cell(tr,p.highest_score===null?'—':p.highest_score+'/25');const status=p.homework_status||'Not completed';cell(tr,status,status==='Passed'?'status passed':status==='Not passed'?'status notpassed':'status missing');el('results').append(tr)}
+ if(loading){emptyRow('Loading pupil codes…');return}
+ if(resultsError){emptyRow('Unable to load pupil codes or results: '+resultsError);return}
+ if(!data.length){emptyRow('No pupil codes found in this class.');return}
+ data.sort((a,b)=>registerNumber(a.pupil_code)-registerNumber(b.pupil_code)||a.pupil_code.localeCompare(b.pupil_code));
+ for(const p of data){
+  const tr=document.createElement('tr');cell(tr,p.pupil_code);
+  cell(tr,hasQuiz?String(p.attempts):'—');
+  cell(tr,hasQuiz&&p.highest_score!==null?p.highest_score+'/'+(selectedQuiz.total_questions||25):'—');
+  const status=hasQuiz?(p.homework_status||'Not completed'):'No homework assigned';
+  cell(tr,status,status==='Passed'?'status passed':status==='Not passed'?'status notpassed':'status missing');el('results').append(tr);
+ }
 }
 async function loadResults(){
  const generation=++resultsGeneration;
- liveRows=[];resultsError='';loading=Boolean(approved&&selectedClass&&selectedQuiz);render();
+ liveRows=[];classCodes=[];resultsError='';loading=Boolean(approved&&selectedClass);render();
  if(!loading)return;
- const requested_class=selectedClass.class_name,requested_quiz=selectedQuiz.id;
+ const classId=selectedClass.id,requested_class=selectedClass.class_name,requested_quiz=selectedQuiz?.id;
  try{
-  const {data,error}=await client.rpc('get_history_class_results',{requested_class,requested_quiz});
+  const codeRequest=client.from('history_pupils').select('pupil_code').eq('class_id',classId);
+  const resultRequest=requested_quiz?client.rpc('get_history_class_results',{requested_class,requested_quiz}):Promise.resolve({data:[],error:null});
+  const [codesResult,resultsResult]=await Promise.all([codeRequest,resultRequest]);
   if(generation!==resultsGeneration||!approved)return;
-  if(error)throw error;
-  liveRows=Array.isArray(data)?data:[];
+  if(codesResult.error)throw codesResult.error;
+  if(resultsResult.error)throw resultsResult.error;
+  classCodes=Array.isArray(codesResult.data)?codesResult.data:[];
+  liveRows=Array.isArray(resultsResult.data)?resultsResult.data:[];
  }catch(e){if(generation!==resultsGeneration||!approved)return;resultsError=e.message||'Unknown error'}
  finally{if(generation===resultsGeneration){loading=false;render()}}
 }
