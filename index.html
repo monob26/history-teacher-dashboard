@@ -67,11 +67,11 @@ function updateSelectors(){
  selectedQuiz=availableQuizzes.find(q=>q.id===weekSelect.value)||null;
  classSelect.disabled=!selectedClass;weekSelect.disabled=!selectedQuiz;
 }
-function registerNumber(code){const m=String(code).match(/-(\d+)$/);return m?Number(m[1]):Number.MAX_SAFE_INTEGER}
+function registerNumber(pupil){const n=Number(pupil.register_number);return Number.isInteger(n)&&n>0?n:Number.MAX_SAFE_INTEGER}
 function render(){
  const ready=approved&&selectedClass&&!loading&&!resultsError;
  const hasQuiz=Boolean(selectedQuiz);
- const data=ready?(hasQuiz?liveRows:classCodes.map(p=>({pupil_code:p.pupil_code,attempts:0,highest_score:null,homework_status:'No homework assigned'}))):[];
+ const data=ready?(hasQuiz?liveRows:classCodes.map(p=>({pupil_code:p.pupil_code,register_number:p.register_number,attempts:0,highest_score:null,homework_status:'No homework assigned'}))):[];
  const completed=hasQuiz?data.filter(p=>Number(p.attempts)>0).length:0;
  const passed=hasQuiz?data.filter(p=>p.homework_status==='Passed').length:0;
  const values={total:ready?data.length:'—',completed:ready&&hasQuiz?completed:'—',passed:ready&&hasQuiz?passed:'—',missing:ready&&hasQuiz?data.length-completed:'—'};
@@ -83,7 +83,7 @@ function render(){
  if(loading){emptyRow('Loading pupil codes…');return}
  if(resultsError){emptyRow('Unable to load pupil codes or results: '+resultsError);return}
  if(!data.length){emptyRow('No pupil codes found in this class.');return}
- data.sort((a,b)=>registerNumber(a.pupil_code)-registerNumber(b.pupil_code)||a.pupil_code.localeCompare(b.pupil_code));
+ data.sort((a,b)=>registerNumber(a)-registerNumber(b)||a.pupil_code.localeCompare(b.pupil_code));
  for(const p of data){
   const tr=document.createElement('tr');cell(tr,p.pupil_code);
   cell(tr,hasQuiz?String(p.attempts):'—');
@@ -98,7 +98,7 @@ async function loadResults(){
  if(!loading)return;
  const classId=selectedClass.id,requested_class=selectedClass.class_name,requested_quiz=selectedQuiz?.id;
  try{
-  const codeRequest=client.from('history_pupils').select('pupil_code').eq('class_id',classId);
+  const codeRequest=client.from('history_pupils').select('pupil_code,register_number').eq('class_id',classId);
   const resultRequest=requested_quiz?client.rpc('get_history_class_results',{requested_class,requested_quiz}):Promise.resolve({data:[],error:null});
   const [codesResult,resultsResult]=await Promise.all([codeRequest,resultRequest]);
   if(generation!==resultsGeneration||!approved)return;
