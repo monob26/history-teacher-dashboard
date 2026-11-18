@@ -1,0 +1,19 @@
+name: Teacher mirror release checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-checks:
+    name: Check canonical release
+    # Keep the reusable workflow and the tested hub revision pinned together.
+    uses: monob26/gcse-history-homework-hub/.github/workflows/tests.yml@67f0163f76ed0549a8df657f6e9c6c14e11304e9
+    with:
+      canonical_ref: 67f0163f76ed0549a8df657f6e9c6c14e11304e9
